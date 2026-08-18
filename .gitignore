@@ -1,0 +1,4 @@
+.idea/
+**__pycache__/
+#.env --- Don`t write a secret data
+*.db
