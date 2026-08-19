@@ -1,7 +1,7 @@
 from enum import StrEnum, auto
 from datetime import date
 
-from sqlalchemy import String, Integer, Boolean, text, Date, ForeignKey, Enum
+from sqlalchemy import String, Integer, Boolean, text, Date, ForeignKey, Enum, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -10,6 +10,14 @@ from database import Base
 class StatusEnum(StrEnum):
     APPLIED = auto()
     NOT_INTERESTED = auto()
+
+
+vacancy_category_table = Table(
+    "vacancy_categories",
+    Base.metadata,
+    Column("vacancy_id", ForeignKey("vacancies.id"), primary_key=True),
+    Column("category_id", ForeignKey("categories.id"), primary_key=True),
+)
 
 
 class Company(Base):
@@ -21,6 +29,18 @@ class Company(Base):
     vacancies: Mapped[list["Vacancy"]] = relationship(back_populates="company")
 
 
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(31), nullable=False, unique=True)
+
+    vacancies: Mapped[list["Vacancy"]] = relationship(
+        secondary=vacancy_category_table,
+        back_populates="categories"
+    )
+
+
 class Vacancy(Base):
     __tablename__ = "vacancies"
 
@@ -29,11 +49,14 @@ class Vacancy(Base):
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     publication_date: Mapped[date] = mapped_column(Date, nullable=False)
     url: Mapped[str] = mapped_column(String(63), nullable=False, unique=True)
-    category: Mapped[str] = mapped_column(String(31), nullable=False)
     status: Mapped[str | None] = mapped_column(
         Enum(StatusEnum, name="vacancy_status"),
         nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
 
-    company: Mapped[Company] = relationship(back_populates="vacancies")
+    company: Mapped["Company"] = relationship(back_populates="vacancies")
+    categories: Mapped[list["Category"]] = relationship(
+        secondary=vacancy_category_table,
+        back_populates="vacancies"
+    )
