@@ -8,7 +8,7 @@ from sqlalchemy.dialects.sqlite import insert
 
 from bs4 import BeautifulSoup
 
-from database import async_session
+from database import sync_session
 from models import Company, Vacancy, Category, vacancy_category_table
 
 MONTHS = {
@@ -27,13 +27,13 @@ MONTHS = {
 }
 
 
-async def scrap_data():
+def scrap_data():
     current_year = datetime_date.today().year
 
     with httpx.Client(timeout=30) as client:
-        async with async_session() as db_session:
+        with sync_session() as db_session:
             try:
-                await db_session.execute(update(Vacancy).values(is_active=False))
+                db_session.execute(update(Vacancy).values(is_active=False))
 
                 vacancy_categories_res = client.get("https://jobs.dou.ua/")
                 vacancy_categories_res.raise_for_status()
@@ -104,28 +104,24 @@ async def scrap_data():
                             data["count"] += vacancies_data["num"]
 
                 categories_dict = dict(
-                    (
-                        await db_session.execute(
-                            insert(Category)
-                            .values(categories)
-                            .on_conflict_do_update(
-                                index_elements=("name",), set_={"id": Category.id}
-                            )
-                            .returning(Category.name, Category.id)
+                    db_session.execute(
+                        insert(Category)
+                        .values(categories)
+                        .on_conflict_do_update(
+                            index_elements=("name",), set_={"id": Category.id}
                         )
+                        .returning(Category.name, Category.id)
                     ).all()
                 )
 
                 companies_dict = dict(
-                    (
-                        await db_session.execute(
-                            insert(Company)
-                            .values([{"name": company} for company in companies])
-                            .on_conflict_do_update(
-                                index_elements=("name",), set_={"id": Company.id}
-                            )
-                            .returning(Company.name, Company.id)
+                    db_session.execute(
+                        insert(Company)
+                        .values([{"name": company} for company in companies])
+                        .on_conflict_do_update(
+                            index_elements=("name",), set_={"id": Company.id}
                         )
+                        .returning(Company.name, Company.id)
                     ).all()
                 )
                 vacancies_list = [
@@ -138,15 +134,13 @@ async def scrap_data():
                     for url, data in vacancy_objects.items()
                 ]
                 vacancies_dict = dict(
-                    (
-                        await db_session.execute(
-                            insert(Vacancy)
-                            .values(vacancies_list)
-                            .on_conflict_do_update(
-                                index_elements=("url",), set_={"is_active": True}
-                            )
-                            .returning(Vacancy.id, Vacancy.url)
+                    db_session.execute(
+                        insert(Vacancy)
+                        .values(vacancies_list)
+                        .on_conflict_do_update(
+                            index_elements=("url",), set_={"is_active": True}
                         )
+                        .returning(Vacancy.id, Vacancy.url)
                     ).all()
                 )
                 vacancy_categories_list = [
@@ -155,17 +149,17 @@ async def scrap_data():
                         "category_id": categories_dict[category_name],
                     }
                     for id_ in vacancies_dict
-                    for category_name in vacancy_objects[
-                        vacancies_dict[id_] # url
-                    ]["categories"]
+                    for category_name in vacancy_objects[vacancies_dict[id_]][  # url
+                        "categories"
+                    ]
                 ]
-                await db_session.execute(
+                db_session.execute(
                     insert(vacancy_category_table)
                     .values(vacancy_categories_list)
                     .on_conflict_do_nothing(
                         index_elements=("vacancy_id", "category_id")
                     )
                 )
-                await db_session.commit()
+                db_session.commit()
             except Exception as e:
                 ...

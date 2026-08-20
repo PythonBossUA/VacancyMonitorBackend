@@ -1,97 +1,121 @@
 import threading
 
 from typing import Annotated
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, Query, Depends, HTTPException, status
-from sqlalchemy import select, or_, func
+from fastapi import FastAPI, Query, Depends, Request
+from sqlalchemy import select, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import contains_eager
 
 from database import get_session
-from models import Company, Vacancy, StatusEnum
+from models import Company, Vacancy, StatusEnum, Category
+from scraper import scrap_data
 
-app = FastAPI(
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None
-)
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 DATABASE = Annotated[AsyncSession, Depends(get_session)]
 PAGE_SIZE = 50
 
+
 @app.get("/")
 async def get_scraped_data(
+    request: Request,
     database: DATABASE,
 
     search: str = Query(default=""),
-    selected_category: str = Query(default=""),
-    selected_status: StatusEnum = Query(default=""),
-    selected_is_active: bool = Query(default=None),
-
-    page: int = Query(default=1)
+    category: str = Query(default=""),
+    status: StatusEnum | str = Query(default=""),
+    is_active: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
 ):
-    categories = await database.scalars(
-        select(Vacancy.category)
-        .distinct(Vacancy.category)
-        .order_by(Vacancy.category.asc())
-    )
-
-    count = await database.scalar(
-        select(func.count(Vacancy.id))
-    )
-
-    total_count = (count + PAGE_SIZE - 1) // PAGE_SIZE
-    if PAGE_SIZE * page > total_count:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="The page does not exist."
-        )
+    query_params = {}
 
     stmt = (
         select(Vacancy)
         .join(Vacancy.company)
-        .order_by(Vacancy.publication_date.desc())
+        .options(contains_eager(Vacancy.company))
+        .order_by(Vacancy.id.asc())
     )
 
     if search:
         stmt = stmt.where(
-            or_(
-                Vacancy.name.ilike(f"%{search}%"),
-                Company.name.ilike(f"%{search}%")
-            )
+            or_(Vacancy.name.ilike(f"%{search}%"), Company.name.ilike(f"%{search}%"))
         )
+        query_params["search"] = search
 
-    if selected_category:
+    if category:
         stmt = stmt.where(
-            Vacancy.category == selected_category
+            Vacancy.categories.any(Category.name == category)
         )
+        query_params["category"] = category
 
-    if selected_status == "none":
-        stmt = stmt.where(
-            Vacancy.status.is_(None)
-        )
-    elif selected_status:
-        stmt = stmt.where(
-            Vacancy.status == selected_status
-        )
+    if status:
+        if status == "null":
+            stmt = stmt.where(Vacancy.status.is_(None))
+        else:
+            stmt = stmt.where(Vacancy.status == status)
 
-    if selected_is_active is not None:
-        stmt = stmt.where(
-            Vacancy.is_active == selected_is_active
-        )
+        query_params["status"] = status
 
-    stmt = (
-        stmt
-        .offset((page - 1) * PAGE_SIZE)
-        .limit(PAGE_SIZE)
-    )
-    vacancies = await database.scalars(stmt)
+    if is_active is not None:
+        stmt = stmt.where(Vacancy.is_active == is_active)
+        query_params["is_active"] = is_active
+
+    stmt = stmt.offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1)
+    vacancies = (await database.scalars(stmt)).all()
+
+    path = request.url.path
+
+    is_next_page = bool(vacancies.pop(-1) if len(vacancies) > PAGE_SIZE else False)
+    is_previous_page = page > 1
+
+    vacancies_json = [
+        {
+            "id": vacancy.id,
+            "name": vacancy.name,
+            "company_name": vacancy.company.name,
+            "publication_date": vacancy.publication_date,
+            "original_url": vacancy.url,
+            "status": vacancy.status.value if vacancy.status else None,
+            "is_active": vacancy.is_active
+        }
+        for vacancy in vacancies
+    ]
 
     return {
-        "vacancies": len(vacancies),
-        "total_count": total_count,
-        "search_query": search,
-        "categories": categories,
-        "selected_category": selected_category,
-        "selected_status": selected_status,
-        "selected_is_active": selected_is_active,
-        "status_choices": StatusEnum,
+        "vacancies": vacancies_json,
+        "next_page": (
+            f"{path}?{urlencode(query_params | {"page": page + 1})}"
+            if is_next_page
+            else None
+        ),
+        "previous_page": (
+            f"{path}?{urlencode(query_params | {"page": page - 1})}"
+            if is_previous_page
+            else None
+        ),
     }
+
+
+@app.get("/categories/")
+async def get_categories(database: DATABASE):
+    return (
+        await database.scalars(
+            select(Category.name).distinct().order_by(Category.name.asc())
+        )
+    ).all()
+
+
+@app.delete("/delete")
+async def delete_all_inactive_vacancies(database: DATABASE):
+    await database.execute(delete(Vacancy).where(Vacancy.is_active.is_(False)))
+    return {}
+
+
+@app.post("/scrap/")
+async def start_scrap_data():
+    threading.Thread(
+        target=scrap_data,
+        daemon=True,
+    ).start()
+    return {"type": "Scraping started"}
