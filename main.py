@@ -44,7 +44,7 @@ async def get_scraped_data(
         select(Vacancy)
         .join(Vacancy.company)
         .options(contains_eager(Vacancy.company))
-        .order_by(Vacancy.id.asc())
+        .order_by(Vacancy.publication_date.desc())
     )
 
     if search:
