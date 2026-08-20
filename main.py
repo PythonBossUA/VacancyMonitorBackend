@@ -4,9 +4,12 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Query, Depends, Request, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+
 from sqlalchemy import select, or_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
+
 
 from database import get_session
 from models import Company, Vacancy, StatusEnum, Category
@@ -15,6 +18,13 @@ from scraper import scrap_data
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 DATABASE = Annotated[AsyncSession, Depends(get_session)]
 PAGE_SIZE = 50
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://vacancy-monitor.onrender.com"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
