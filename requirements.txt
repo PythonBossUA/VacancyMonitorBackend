@@ -6,3 +6,4 @@ aiosqlite
 bs4
 orjson
 sqlalchemy
+orjson

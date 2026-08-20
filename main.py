@@ -1,8 +1,10 @@
+import orjson
+
 from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Query, Depends, Request, BackgroundTasks
-from sqlalchemy import select, or_, delete
+from sqlalchemy import select, or_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
 
@@ -95,7 +97,22 @@ async def get_scraped_data(
     }
 
 
-@app.get("/categories/")
+@app.patch("/status/{vacancy_id}")
+async def update_vacancy_status(request: Request, vacancy_id: int, database: DATABASE):
+    data = orjson.loads(await request.body())
+    status = data.get("status")
+
+    enum_status = getattr(StatusEnum, status or "", None)
+
+    await database.execute(
+        update(Vacancy)
+        .values({"status": enum_status})
+        .where(Vacancy.id == vacancy_id)
+    )
+    return {"status": "OK"}
+
+
+@app.get("/categories")
 async def get_categories(database: DATABASE):
     return (
         await database.scalars(
@@ -110,7 +127,7 @@ async def delete_all_inactive_vacancies(database: DATABASE):
     return {"status": "OK"}
 
 
-@app.post("/scrap/")
+@app.post("/scrap")
 async def start_scrap_data(bg: BackgroundTasks):
     bg.add_task(scrap_data)
     return {"status": "OK"}
