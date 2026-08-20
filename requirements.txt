@@ -1,0 +1,8 @@
+fastapi
+alembic
+httpx
+granian
+aiosqlite
+bs4
+orjson
+sqlalchemy

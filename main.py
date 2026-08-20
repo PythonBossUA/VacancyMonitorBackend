@@ -1,9 +1,7 @@
-import threading
-
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Query, Depends, Request
+from fastapi import FastAPI, Query, Depends, Request, BackgroundTasks
 from sqlalchemy import select, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
@@ -109,13 +107,10 @@ async def get_categories(database: DATABASE):
 @app.delete("/delete")
 async def delete_all_inactive_vacancies(database: DATABASE):
     await database.execute(delete(Vacancy).where(Vacancy.is_active.is_(False)))
-    return {}
+    return {"status": "OK"}
 
 
 @app.post("/scrap/")
-async def start_scrap_data():
-    threading.Thread(
-        target=scrap_data,
-        daemon=True,
-    ).start()
-    return {"type": "Scraping started"}
+async def start_scrap_data(bg: BackgroundTasks):
+    bg.add_task(scrap_data)
+    return {"status": "OK"}
